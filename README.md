@@ -380,4 +380,160 @@ class ProductServiceImplTest: BehaviorSpec({
 ```
 
 
+컨트롤러까지 만들었짐나... 컨트롤러를 테스트케이스까지 만들어야하는 이유는 잘 모르겠다.
+- 컨트롤러에 대한 단위 테스트를 만드는 이유는 무엇인가? 리턴값이 무엇인지 증명하기 위해서일것이다.
+- 근데 컨트롤러에서 모든 리턴값이 나오는것이 아니라서 문제이다. Thorw를 던진경우에는 어떻게 할것인가?
 
+
+---
+
+이후에 할일 : 계획
+1. docker로 배포하기
+2. 각각을 모듈화하기
+   - 그래서 웹프로젝트로 배포하고
+   - 그래서 UI도 같이 하기
+   - 같이 하기 그런가? 리액트와 파이썬과 자바가 같이 있으면 이상할까? 
+   - 자바와 코틀린이 같이 있으면 이상할까?
+
+우선은 배포하기부터하자
+
+기본 base는 도커파일이다.
+개발서버까지 만들어서 배포해야할지를 정하자.
+
+I. 도커파일만들어서 도커화하기
+   - DMBS는 어떻게 할것인가?
+   - 우선은 같이 만든다.
+   - 추후에는 분리하겠지만.. 우선은 한몸으로 움직여야한다.
+   - 차라리 메모리 DB를 쓸까?
+
+배포버튼을 어디서 만들것인가?
+1. 인텔리J에서 지정
+2. AWS에서 지정
+3. 인텔리J에서 AWS로 배포
+4. git hub에서 action으로 배포
+
+개발서버와 로컬, 로컬서버, 운영서버의 activate 분리하기
+- 프로퍼티 분리
+- 프로퍼티에 따라서 DBMS정보 분리
+  - 메모리 DB
+  - mysql
+
+리액트는 조금 틀릴려나?
+파이썬도 틀릴려나?
+
+
+---
+우선은 gradle에서 bootJar로 만들어서 실행해보았다.
+실행 잘된다...
+
+이제 도커로 만들어보자.
+
+```markdown
+
+### 빌드
+그래들에서 bootJar 실행
+
+### 파일명 : Dockfile
+#### profile 옵션을 추가해야한다.
+FROM openjdk:18
+ENV	USE_PROFILE localserver
+
+ARG JAR_FILE=*.jar
+COPY ${JAR_FILE} app.jar
+EXPOSE 9201
+
+ENTRYPOINT ["java","-Dspring.profiles.active={USE_PROFILE}","-jar","app.jar"]
+
+
+VM옵션 :  -Dspring.profiles.active=localserver
+
+ENTRYPOINT ["java","-Dspring.profiles.active=${USE_PROFILE}", "-Djava.security.egd=file:/dev/./urandom","-jar","/app.jar"]
+
+
+### 도커 이미지만들기
+docker build -t springbootdemo ./
+
+### 도커 네트워크 만들기
+mysql도 network 옵션을 걸고, app도 network 옵션을 걸어야한다.
+#### app과 mysql을 같은 네트워크로 만들어야 한다.
+docker network create springboot-mysql-net
+#### 네트워크 확인
+docker network ls
+
+#### mysql과 같은 네트워크로 만들어서 띄우기
+
+docker run -p 8080:8080 --name springboot-mysql-demo --network springboot-mysql-net -d springbootdemo
+
+### 도커 이미지 로드
+#springbootdemo.tar로 이미지 저장
+docker save -o d:\springbootdemo.tar springbootdemo:latest
+
+#springbootdemo 이미지 로드
+docker load -i .\springbootdemo.tar
+
+
+### 도커 이미지 실행
+docker run -d -p 7250:9201 springbootdemo
+
+
+```
+
+## 도커 실행 오류 발생 : DB접속 오류가 밣생하였다.
+- DB설정IP가 localhost로 되어 있어서 오류가 발생하는 것 같다.
+- profile로 갈라야 하지 않을까? 싶다.
+- 그럼 localhost를 어떻게 바꿀까?
+  - 로컬에서는 ip대신에 도커 컨테이너 이름을 써도 된다. ><
+  - 같이 띄우는것보다 더 효과적일것 같다.
+
+
+우선은 도커에 DB까지 설치되게 하면 어떻게 해야하는가?
+- 이렇게 한꺼번에 하지 않고, 
+- https://velog.io/@dhk22/Springboot-MySQL-Docker-%EB%8F%84%EC%BB%A4%EB%A5%BC-%EC%9D%B4%EC%9A%A9%ED%95%9C-%EC%BB%A8%ED%85%8C%EC%9D%B4%EB%84%88-%ED%99%98%EA%B2%BD-%EA%B5%AC%EC%84%B1
+  - 도커 컴포즈를 사용하는게 일반적이다.
+
+우선은 profile가 필요하다.
+각각의 프로퍼티를 사용하려면 프로퍼티파일을 갈르면된다.
+
+```markdown
+환경에 따라 올바른 설정파일을 읽도록 유도하는 것을 'Profile'이라 부른다.
+
+Spring은 Profile 사용을 위한 약속을 갖고 있다.
+
+1) spring.profiles.active 속성에 값을 부여
+커맨드라인옵션 : --spring.profiles.active=dev
+JVM vm옵션 :  -Dspring.profiles.active=dev
+   
+2) 설정파일명은 application-{profile}.properties로 한다.
+application-dev.properties
+application-prd.properties
+```
+
+
+jdbc가 없다고 오류가 발생한다. 서버에 jdbc가 없어서 그런걸까?
+- 네트워크가 같은 곳이 아니라서 못찾는것 같다.
+- 네트워크를 같게 하기위해서 docker compose를 사용하면 된다.
+
+=> docker compose를 사용하자!
+
+
+## 드디어 성공했다. docker로만으로 성공했다.
+- 조금 이상하긴하다.
+- docker compose로 DB를 만든다.
+- 근데... 앱은 그냥 DockerFil로 만들다니...
+- 둘다 docker compose로 만들면 어떻게 되는가?
+- compose.yml파일을 두개 가지고 가야하나?
+
+
+## dockre compose로 만들어보자.
+기본 베이스는 다음 사이트를 참조
+- https://velog.io/@mooh2jj/docker-compose%EB%A1%9C-SprongBoot-JPA-MySql-DB-%EC%84%9C%EB%B2%84%EB%A7%8C%EB%93%A4%EA%B8%B0
+- DB설정등은 내가 가지고 있는 것으로 하고..
+  - 안바꾸면 안돌아간다.
+  - 이미 돌아가고 있는 DB의 포트가 있으면 오류가 발생한다.
+- 포트도 바꾼다. 내부가 7050이고, 외부가 9201이다.
+- application에서 DB 설정은 compose에서 설정해야한다. application에서 하면 안된다.
+  - 그래서 application.properties에서 DB 설정을 모두 빼야 한다.
+- 
+
+```markdown
+오 간단하자나!
